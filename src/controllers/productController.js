@@ -1,4 +1,5 @@
 const Product = require('../models/product');
+const fs = require('fs');
 const path = require('path');
 const { uploadImage } = require('../utils/imageUpload');
 const OfferType = require('../utils/enums/offerType'); // Import OfferType class
@@ -15,10 +16,13 @@ class ProductController {
                 return errorResponse(res, 400, 'Missing required fields. Category, name, description, price, and image are required.');
             }
 
-            // Validate offer type
-            const offerTypeInt = parseInt(offer_type, 10); // Convert to integer
-            if (!Object.values(OfferType.OFFER_TYPES).includes(offerTypeInt)) {
-                return errorResponse(res, 400, `Invalid offer type. Allowed values are: ${Object.values(OfferType.OFFER_TYPES).join(', ')}`);
+            // Validate offer type only if provided, otherwise default to NO_OFFER
+            let offerTypeInt = OfferType.OFFER_TYPES.NO_OFFER;
+            if (offer_type !== undefined) {
+                offerTypeInt = parseInt(offer_type, 10);
+                if (!Object.values(OfferType.OFFER_TYPES).includes(offerTypeInt)) {
+                    return errorResponse(res, 400, `Invalid offer type. Allowed values are: ${Object.values(OfferType.OFFER_TYPES).join(', ')}`);
+                }
             }
 
             // Upload the image
@@ -26,7 +30,7 @@ class ProductController {
             const imagePath = await uploadImage(image, uploadFolder);
 
             // Create the product instance
-            const newProduct = new Product({ category_id, name, image: imagePath, description, offer_type, price });
+            const newProduct = new Product({ category_id, name, image: imagePath, description, offer_type: offerTypeInt, price });
 
             // Save the product
             const savedProduct = await newProduct.save();
@@ -55,6 +59,78 @@ class ProductController {
             return successResponse(res, 200, 'Products fetched successfully', formattedProducts);
         } catch (error) {
             return errorResponse(res, 500, 'Failed to fetch products', error.message);
+        }
+    };
+
+    getProductById = async (req, res) => {
+        try {
+            const product = await Product.findById(req.params.id).populate('category_id', 'name').lean();
+            if (!product) return errorResponse(res, 404, 'Product not found');
+            const { category_id, ...rest } = product;
+            return successResponse(res, 200, 'Product fetched successfully', {
+                ...rest,
+                offer_type: OfferType.castOfferType(product.offer_type),
+                category_detail: category_id,
+            });
+        } catch (error) {
+            return errorResponse(res, 500, 'Failed to fetch product', error.message);
+        }
+    };
+
+    updateProduct = async (req, res) => {
+        try {
+            const product = await Product.findById(req.params.id);
+            if (!product) return errorResponse(res, 404, 'Product not found');
+
+            const { name, description, offer_type, price, category_id } = req.body;
+            if (name) product.name = name;
+            if (description) product.description = description;
+            if (price !== undefined) product.price = price;
+            if (category_id) product.category_id = category_id;
+            if (offer_type !== undefined) {
+                const offerTypeInt = parseInt(offer_type, 10);
+                if (!Object.values(OfferType.OFFER_TYPES).includes(offerTypeInt)) {
+                    return errorResponse(res, 400, `Invalid offer type. Allowed values are: ${Object.values(OfferType.OFFER_TYPES).join(', ')}`);
+                }
+                product.offer_type = offerTypeInt;
+            }
+
+            if (req.files && req.files.image) {
+                const uploadFolder = path.join(__dirname, '../../uploads/products');
+                const newImagePath = await uploadImage(req.files.image, uploadFolder);
+
+                if (product.image) {
+                    const oldImagePath = path.join(__dirname, '../../', product.image);
+                    if (fs.existsSync(oldImagePath)) {
+                        fs.unlinkSync(oldImagePath);
+                    }
+                }
+                product.image = newImagePath;
+            }
+
+            const saved = await product.save();
+            return successResponse(res, 200, 'Product updated successfully', saved);
+        } catch (error) {
+            return errorResponse(res, 500, 'Failed to update product', error.message);
+        }
+    };
+
+    deleteProduct = async (req, res) => {
+        try {
+            const product = await Product.findById(req.params.id);
+            if (!product) return errorResponse(res, 404, 'Product not found');
+
+            if (product.image) {
+                const oldImagePath = path.join(__dirname, '../../', product.image);
+                if (fs.existsSync(oldImagePath)) {
+                    fs.unlinkSync(oldImagePath);
+                }
+            }
+
+            await Product.findByIdAndDelete(req.params.id);
+            return successResponse(res, 200, 'Product deleted successfully');
+        } catch (error) {
+            return errorResponse(res, 500, 'Failed to delete product', error.message);
         }
     };
 }
