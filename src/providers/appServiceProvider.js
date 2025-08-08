@@ -8,11 +8,16 @@ class AppServiceProvider {
 
     static async connectDatabase() {
         try {
-            await mongoose.connect(process.env.MONGO_DB_URI);
+            const uri = process.env.MONGO_DB_URI;
+            if (!uri) {
+                console.warn("MONGO_DB_URI not set. Skipping MongoDB connection.");
+                return;
+            }
+            await mongoose.connect(uri);
             console.log("Connected to MongoDB");
         } catch (error) {
             console.error("Database connection error", error);
-            throw error; 
+            // Do not throw to allow server to boot without DB for local/dev
         }
     }
 
